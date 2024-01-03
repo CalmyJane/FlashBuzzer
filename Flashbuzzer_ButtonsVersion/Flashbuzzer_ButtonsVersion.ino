@@ -1,19 +1,11 @@
 #include <FastLED.h>
 #include <EEPROM.h>
 
-#define LED_PIN     3
-#define NUM_LEDS    255
-#define LED_TYPE    WS2811
-#define COLOR_ORDER RGB
-
-int* readFromEEPROM() {
-    static int data[16];  // Making it static to retain its value after the function returns
-    for (int i = 0; i < 16; i++) {
-        data[i] = EEPROM.read(i);
-    }
-    return int(255, 255, 255, 255, 1024, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ,0);
-    return data;
-}
+#define LED_PIN         3
+#define NUM_LEDS        255
+#define LED_TYPE        WS2811
+#define COLOR_ORDER     RGB
+#define SETTINGS_COUNT  16
 
 // CRGB leds[NUM_LEDS];
 CRGB leds[NUM_LEDS]; //Initialize led array with nubmer of elements from eeprom
@@ -33,265 +25,432 @@ enum LEDSetting {
     COLOR_BLUE,
     SPEED,
     NUMBER_LEDS,
-    RESERVED1,
-    RESERVED2,
-    RESERVED3,
-    RESERVED4,
-    RESERVED5,
-    RESERVED6,
-    RESERVED7,
-    RESERVED8,
-    RESERVED9,
-    RESERVED10,
-    RESERVED11
-    // Add other settings as needed
+    INDEX1,
+    COLOR_RED2,
+    COLOR_GREEN2,
+    COLOR_BLUE2,
+    INDEX2,
+    COLOR_RED3,
+    COLOR_GREEN3,
+    COLOR_BLUE3,
+    RANDOM,
+    BROKEN_MODE,
+    BROKEN_THRESHOLD
 };
 
-class LEDSettingsManager {
+class Button {
+  public:
+    bool state = false;
+    bool lastState = false;
+    bool pressed = false;
+    bool released = false;
+    bool holding = false; // Indicates if the button is being held
+    int pin = 0;
+    bool analogPin = false;
+    bool inverted = true;
+    unsigned long pressStartTime = 0; // Time when the button was pressed
+    unsigned long holdTimeout = 500; // Default hold timeout in milliseconds
 
-  //Settings:
-  // 0 Color Red - 0=Random Color, 1-254 = fixed color, 255 = white
-  // 1 Color Green - 0..255
-  // 2 Color Blue - 0..255
-  // 3 Speed - Speed from 0 (slow) to 255 (fast)
-  // 4 Number Leds - 50..255, when this is changed, the device needs to be reset!
-  //rest is reserved
-private:
-    int setts[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    int displayStartIndex = 0; // Start index for display settings
-    int displayEndIndex = 44; // End index for display settings
-    bool toggle = false; //used to blink the LEDs
+    Button() {}
 
-public:
-    LEDSettingsManager() {
-        // Initialize settings array
-      read_from_eeprom();
-    }
-
-    void read_from_eeprom() {
-      for (int i = 0; i < 16; i++) {
-          setts[i] = EEPROM.read(i);
-      }
-    }
-
-    bool is_dark(){
-      return (setts[COLOR_RED] <= 5 && setts[COLOR_GREEN] <= 5 && setts[COLOR_BLUE] <= 5);
-    }
-
-    CRGB get_color(){
-      return CRGB(setts[COLOR_RED], setts[COLOR_GREEN], setts[COLOR_BLUE]);
-    }
-
-    int get_speed(){
-      return setts[SPEED];
-    }
-
-    void display_setting(LEDSetting setting_index, bool blinking=false) {
-        // Show current setting value as solid LEDs
-        int value = map(setts[setting_index], 0, 255, displayStartIndex, displayEndIndex);
-        CRGB bar_color = CRGB::Red;
-        if(setting_index == NUMBER_LEDS){
-          //changing Number of LEDs
-          value = setts[NUMBER_LEDS]; //use value unscaled, so the length of the LED strip can be adjusted from 0 .. 255
-          bar_color = CRGB::Blue;
-        }
-        if(setting_index >= 0 && setting_index <= 2){
-          //setting color, use current color to display
-          if(setts[0] <= 5 && setts[1] <= 5 && setts[2] <= 5){
-            //all Colors low, choose random
-            bar_color = CRGB(random(255), random(255), random(255));
-          } else if(setts[0] == 255) {
-            bar_color = CRGB(255, 255, 255);
-          } else{
-            bar_color = CRGB(setts[0], setts[1], setts[2]);
-          }
-        }
-
-        //Display LED-Bar
-        for (int i = 0; i < NUM_LEDS; i++) {
-            if (i >= (displayStartIndex) && i <= value) {
-                leds[i] = toggle || !blinking ? bar_color : CRGB::Black;
-            } else {
-                leds[i] = CRGB::Black;
-            }
-        }          
-        
-        toggle = !toggle;
-        delay(map(setts[SPEED], 0, 255, 100, 50)); //blink with current speed setting
-        // Note: FastLED.show() should be called externally after this function
-    }
-
-    void set_setting(int setting_index, int value) {
-        if(setting_index == 5 && value < 30){
-          //limit number of LEDs to 
-          value = 30;
-        }
-        setts[setting_index] = value;
-        display_setting(setting_index, true); // Update display to show new setting
-        // Note: FastLED.show() should be called externally after this function
-    }
-
-    int get_setting(int setting_index) {
-        return setts[setting_index];
-    }
-
-    int* get_settings() {
-        return setts;
-    }
-
-    void write_to_eeprom(){
-      //writes the current settings to EEPROM
-      for (int i = 0; i < 16; i++) {
-        EEPROM.write(i, setts[i]);
-      }
-      Serial.println("written to EEPROM");
-    }
-
-    // Additional methods and properties can be added as needed
-};
-
-class LEDMode {
-public:
-    virtual void update(LEDSettingsManager settings) = 0;
-};
-
-class RunningDotMode : public LEDMode {
-private:
-    bool oldButtonState = HIGH;
-
-public:
-    void update(LEDSettingsManager settings) override {
-        bool newButtonState = digitalRead(BUTTON_PIN);
-        if (newButtonState == LOW && oldButtonState == HIGH) {
-            CRGB color = settings.is_dark() ? CRGB(random(255), random(255), random(255)) : settings.get_color(); // Random or white color if no color selected
-            leds[0] = color;
-        }
-        oldButtonState = newButtonState;
-
-        for (int i = NUM_LEDS - 1; i > 0; i--) {
-            leds[i] = leds[i - 1];
-        }
-        leds[0] = CRGB::Black;
-
-        delay(map(settings.get_speed(), 0, 255, 300, 3)); // Speed of shifting
-    }
-};
-
-class LightSwitchMode : public LEDMode {
-private:
-    bool isOn = false;
-    bool oldButtonState = HIGH;
-
-public:
-    void update(LEDSettingsManager settings) override {
-        bool newButtonState = !digitalRead(BUTTON_PIN);
-        if (newButtonState == LOW && oldButtonState == HIGH) {
-            isOn = !isOn;
-            CRGB color = isOn ? (settings.is_dark() ? CRGB(random(255), 255, 255) : settings.get_color()) : CRGB::Black; // Random or white color based on parameter
-            fill_solid(leds, NUM_LEDS, color);
-            delay(20); // Debounce delay
-        } else {
-          //avoid super fast looping
-          delay(20);
-        }
-        oldButtonState = newButtonState;
-    }
-};
-
-class GradualFillMode : public LEDMode {
-private:
-    int fillLevel = 0;
-    bool filling = false;
-
-public:
-    void update(LEDSettingsManager settings) override {
-        if (digitalRead(BUTTON_PIN) == LOW) {
-            filling = true;
-        } else {
-            filling = false;
-        }
-
-        if (filling && fillLevel < NUM_LEDS) {
-            fillLevel++;
-        } else if (!filling && fillLevel > 0) {
-            fillLevel--;
-        }
-
-        CRGB color = calculateUniformColor(fillLevel);
-        for (int i = 0; i < NUM_LEDS; i++) {
-            leds[i] = i < fillLevel ? color : CRGB::Black;
-        }
-        delay(10);
-    }
-
-    CRGB calculateUniformColor(int fillLevel) {
-        float ratio = float(fillLevel) / float(NUM_LEDS);
-        if (ratio < 0.33) {
-            return CRGB::Green; // Green when few LEDs are lit
-        } else if (ratio < 0.66) {
-            return blend(CRGB::Green, CRGB::Red, (ratio - 0.33) * 6.0); // Blend to yellow and then to red
-        } else {
-            return CRGB::Red; // Red when many LEDs are lit
-        }
-    }
-};
-
-class GameMode : public LEDMode {
-public:
-    void update(LEDSettingsManager settings) override {
-        // Placeholder for game mode
-        // Implement game logic here
-    }
-};
-
-class BTN_INPUT {
-public:
-    BTN_INPUT(uint8_t incPin, uint8_t decPin) : incrementPin(incPin), decrementPin(decPin), incrementButtonState(LOW), decrementButtonState(LOW) {
-        pinMode(incPin, INPUT);
-        pinMode(decPin, INPUT);
+    Button(int pinNumber, unsigned long holdTimeoutMs = 500) {
+      pin = pinNumber;
+      holdTimeout = holdTimeoutMs;
+      analogPin = (pinNumber >= A0 && pinNumber <= A7); // Check if it's an analog pin
+      pinMode(pinNumber, INPUT_PULLUP);
     }
 
     void update() {
-        (incrementPin, &incrementButtonState, &lastIncrementPressTime, &incrementPressed);
-        handleButtonPress(decrementPin, &decrementButtonState, &lastDecrementPressTime, &decrementPressed);
-    }
+      lastState = state;
+      bool tmpState = false;
+      unsigned long currentTime = millis();
 
-    int getValue() {
-        return value;
-    }
+      if (analogPin) {
+        tmpState = analogRead(pin) > 400;
+      } else {
+        tmpState = digitalRead(pin);
+      }
 
-    void setValue(int new_value) {
-      value = new_value;
-    }
+      if (inverted) {
+        state = !tmpState;
+      } else {
+        state = tmpState;
+      }
 
-private:
-    const uint8_t incrementPin;
-    const uint8_t decrementPin;
-    bool incrementButtonState, decrementButtonState;
-    bool incrementPressed = false, decrementPressed = false;
-    unsigned long lastIncrementPressTime = 0, lastDecrementPressTime = 0;
-    int value = 0;
+      pressed = !lastState && state;
+      released = lastState && !state;
 
-    void handleButtonPress(uint8_t buttonPin, bool *buttonState, unsigned long *lastPressTime, bool *isPressed) {
-        *buttonState = !digitalRead(buttonPin);
-        unsigned long currentTime = millis();
-        if (*buttonState == HIGH) {
-            if (!*isPressed) {
-                *isPressed = true;
-                *lastPressTime = currentTime;
-                updateValue(buttonPin == incrementPin);
-            } else if (currentTime - *lastPressTime > 1000) {
-                updateValue(buttonPin == incrementPin); // Rapid increment/decrement after 1 second
-            }
-        } else if (*isPressed) {
-            *isPressed = false;
+      // Handling the hold functionality
+      if (pressed) {
+        pressStartTime = currentTime; // Record the time when button is pressed
+      }
+
+      if (state) {
+        if ((currentTime - pressStartTime) >= holdTimeout) {
+          holding = true; // Button is considered as being held
         }
+      } else {
+        holding = false; // Reset holding when button is released
+      }
     }
+};
 
-    void updateValue(bool increase) {
-        if (increase) value++;
-        else if (value > 0) value--;
-    }
+class ControlManager {
+    public:
+        Button buzzer;
+        Button redBtn, greenBtn;
+        Button dipSwitches[4];
+        Button settingsBtn;
+
+    private:
+        int incDecValue = 0;
+        int incDecMin = 0;
+        int incDecMax = 100; // default max value
+        int incDecScrollSpeed = 5;
+        int incDecSkipSpeed = 1;
+        unsigned long incDecThreshold = 1500; // default threshold in ms
+        unsigned long lastButtonPressTime = 0;
+        bool scrolling = false;
+
+    public:
+        ControlManager(int redBtnPin, int greenBtnPin, int settingsBtnPin, int dipPins[4], int buzzerPin) 
+            : redBtn(redBtnPin), greenBtn(greenBtnPin), settingsBtn(settingsBtnPin), buzzer(buzzerPin) {
+            for (int i = 0; i < 4; i++) {
+                dipSwitches[i] = Button(dipPins[i]);
+            }
+            buzzer.inverted = false;
+        }
+
+        void update() {
+            redBtn.update();
+            greenBtn.update();
+            settingsBtn.update();
+            buzzer.update();
+            for (auto &dipSwitch : dipSwitches) {
+                dipSwitch.update();
+            }
+            handleIncDec();
+        }
+
+        LEDSetting getDipValueAsLEDSetting() {
+            int value = 0;
+            for (int i = 0; i < 4; i++) {
+                if (dipSwitches[i].state) {
+                    value |= 1 << i;
+                }
+            }
+            return static_cast<LEDSetting>(value);
+        }
+
+        LEDSetting getDipValue() {
+            int value = 0;
+            for (int i = 0; i < 4; i++) {
+                if (dipSwitches[i].state) {
+                    value |= 1 << i;
+                }
+            }
+            return value;
+        }
+
+        void setIncDecValue(int value) {
+            incDecValue = value;
+        }
+
+        int getIncDecValue() {
+            return incDecValue;
+        }
+
+        void setIncDecMin(int min) {
+            incDecMin = min;
+        }
+
+        void setIncDecMax(int max) {
+            incDecMax = max;
+        }
+
+        void setIncDecScrollSpeed(int speed) {
+            incDecScrollSpeed = speed;
+        }
+
+        void setIncDecThreshold(unsigned long threshold) {
+            incDecThreshold = threshold;
+        }
+
+        void setIncDecSkipSpeed(int speed) {
+            incDecSkipSpeed = speed;
+        }
+        void debugPrint() {
+            Serial.print("Buzzer=");
+            Serial.print(buzzer.state ? "1" : "0");
+            Serial.print(" Red=");
+            Serial.print(redBtn.state ? "1" : "0");
+            Serial.print(", Green=");
+            Serial.print(greenBtn.state ? "1" : "0");
+            Serial.print(", Settings=");
+            Serial.print(settingsBtn.state ? "1" : "0");
+            Serial.print(", DIP=");
+            for (int i = 0; i < 4; i++) {
+                Serial.print(dipSwitches[i].state ? "1" : "0");
+            }
+            Serial.print(", IncDecValue=");
+            Serial.print(incDecValue);
+            Serial.println();
+        }
+
+    private:
+        bool Increment() {
+
+            if (incDecValue < incDecMax) {
+                incDecValue += scrolling ? incDecScrollSpeed : incDecSkipSpeed;
+                if(incDecValue > incDecMax){
+                  incDecValue = incDecMax;
+                }
+                return true;
+            } else {
+              return false;
+            }
+        }
+
+        bool Decrement() {
+            if (incDecValue > incDecMin) {
+                incDecValue -= scrolling ? incDecScrollSpeed : incDecSkipSpeed;
+                if(incDecValue < incDecMin){
+                  incDecValue = incDecMin;
+                }
+                return true;
+            } else {
+              return false;
+            }
+        }
+
+        void handleIncDec() {
+            scrolling = (millis() - lastButtonPressTime) >= incDecThreshold && (redBtn.state && !redBtn.pressed || greenBtn.state && !greenBtn.pressed);
+            if (redBtn.pressed) {
+                lastButtonPressTime = millis();
+                Increment();
+            } else if (greenBtn.pressed) {
+                lastButtonPressTime = millis();
+                Decrement();
+            } else if (scrolling) {
+                if (redBtn.state) {
+                    Increment();
+                } else if (greenBtn.state) {
+                    Decrement();
+                }
+            }
+        }
+};
+
+class Setting {
+    public:
+        int value;
+        int minimum;
+        int maximum;
+        int increment;
+        int defaultValue;
+        CRGB color; // Color used for displaying the setting
+
+        Setting(){}
+
+        Setting(int minValue, int maxValue, int defaultValue, int stdIncrement, CRGB settingColor)
+            : minimum(minValue), maximum(maxValue), value(defaultValue), increment(stdIncrement), color(settingColor) {
+              defaultValue = value;
+            }
+
+        void increase() {
+            value = min(value + increment, maximum);
+        }
+
+        void decrease() {
+            value = max(value - increment, minimum);
+        }
+
+        void draw(CRGB leds[]) {
+            int numLedsToLight = map(value, 0, maximum, 0, NUM_LEDS);
+
+            for (int i = 0; i < NUM_LEDS; ++i) {
+                leds[i] = (i < numLedsToLight) ? color : CRGB::Black;
+            }
+            // Note: FastLED.show() should be called externally after this function
+        }
+};
+
+class LEDSettingsManager {
+    public:
+        Setting settings[SETTINGS_COUNT];
+        LEDSettingsManager() {
+            // Initialize settings with default values
+            settings[COLOR_RED] = Setting(0, 255, 255, 5, CRGB::Red);
+            settings[COLOR_GREEN] = Setting(0, 255, 255, 5, CRGB::Green);
+            settings[COLOR_BLUE] = Setting(0, 255, 255, 5, CRGB::Blue);
+            settings[SPEED] = Setting(0, 1024, 5, 5, CRGB::Purple);
+            settings[NUMBER_LEDS] = Setting(50, 350, 350, 1, CRGB::Purple);
+            settings[INDEX1] = Setting(0, 255, 20, 1, CRGB::Yellow); // Example initializer
+            settings[COLOR_RED2] = Setting(0, 255, 255, 5, CRGB::Red);
+            settings[COLOR_GREEN2] = Setting(0, 255, 255, 5, CRGB::Green);
+            settings[COLOR_BLUE2] = Setting(0, 255, 255, 5, CRGB::Blue);
+            settings[INDEX2] = Setting(0, 255, 40, 1, CRGB::Yellow); // Example initializer
+            settings[COLOR_RED3] = Setting(0, 255, 255, 5, CRGB::Red);
+            settings[COLOR_GREEN3] = Setting(0, 255, 255, 5, CRGB::Green);
+            settings[COLOR_BLUE3] = Setting(0, 255, 255, 5, CRGB::Blue);
+            settings[RANDOM] = Setting(0, 1024, 1, 1, CRGB::White); // Example initializer
+            settings[BROKEN_MODE] = Setting(0, 10, 1, 1, CRGB::White); // Example initializer
+            settings[BROKEN_THRESHOLD] = Setting(0, 255, 50, 1, CRGB::White); // Example initializer
+
+            readFromEEPROM();
+        }
+
+        void setSetting(LEDSetting setting, int value) {
+            settings[setting].value = constrain(value, settings[setting].minimum, settings[setting].maximum);
+        }
+
+        int getSetting(LEDSetting setting) {
+            return settings[setting].value;
+        }
+
+        void incrementSetting(LEDSetting setting) {
+            settings[setting].increase();
+        }
+
+        void decrementSetting(LEDSetting setting) {
+            settings[setting].decrease();
+        }
+
+        void drawSetting(CRGB leds[], LEDSetting setting) {
+            settings[setting].draw(leds);
+            // Call FastLED.show() after this function to update the LED strip
+        }
+
+        bool isDark(){
+            return settings[COLOR_RED].value == 0 && settings[COLOR_GREEN].value == 0 && settings[COLOR_BLUE].value == 0;
+        }
+
+        CRGB getColor(){
+            return CRGB(settings[COLOR_RED].value, settings[COLOR_GREEN].value, settings[COLOR_BLUE].value);
+        }
+
+        void writeToEEPROM(){
+          //write values to EEPROM
+          for (int i = 0; i < SETTINGS_COUNT; ++i) {
+              EEPROM.write(i, settings[i].value);
+          }   
+          Serial.println("Written to EEPROM!");
+        }
+
+        void readFromEEPROM(){
+            // Read settings from EEPROM and overwrite defaults if necessary
+            for (int i = 0; i < SETTINGS_COUNT; ++i) {
+                int eepromValue = EEPROM.read(i);
+                settings[i].value = eepromValue;
+            }      
+        }
+
+        void resetToDefault(){
+          for (int i = 0; i < SETTINGS_COUNT; i++){
+            settings[i].value = settings[i].defaultValue;
+          }
+        }
+
+        void debugPrint() {
+            for (int i = 0; i < SETTINGS_COUNT; ++i) {
+                Serial.print(settings[i].value);
+                Serial.print(i < SETTINGS_COUNT - 1 ? ", " : "\n");
+            }
+        }
+};
+
+
+class LEDMode {
+    public:
+        virtual void update(LEDSettingsManager settings, ControlManager controlManager) = 0;
+};
+
+class RunningDotMode : public LEDMode {
+    private:
+
+    public:
+        void update(LEDSettingsManager settings, ControlManager controlManager) override {
+            bool newButtonState = digitalRead(BUTTON_PIN);
+            if (controlManager.buzzer.pressed) {
+                CRGB color = settings.isDark() ? CRGB(random(255), random(255), random(255)) : settings.getColor(); // Random or white color if no color selected
+                leds[0] = color;
+            }
+
+            for (int i = NUM_LEDS - 1; i > 0; i--) {
+                leds[i] = leds[i - 1];
+            }
+            leds[0] = CRGB::Black;
+
+            // delay(map(settings.settings[SPEED].value, 0, 255, 300, 3)); // Speed of shifting
+            delay(2);
+        }
+};
+
+class LightSwitchMode : public LEDMode {
+    private:
+        bool isOn = false;
+        bool oldButtonState = HIGH;
+
+    public:
+        void update(LEDSettingsManager settings, ControlManager controlManager) override {
+            bool newButtonState = !digitalRead(BUTTON_PIN);
+            if (newButtonState == LOW && oldButtonState == HIGH) {
+                isOn = !isOn;
+                CRGB color = isOn ? (settings.isDark() ? CRGB(random(255), 255, 255) : settings.getColor()) : CRGB::Black; // Random or white color based on parameter
+                fill_solid(leds, NUM_LEDS, color);
+                delay(20); // Debounce delay
+            } else {
+              //avoid super fast looping
+              delay(20);
+            }
+            oldButtonState = newButtonState;
+        }
+};
+
+class GradualFillMode : public LEDMode {
+    private:
+        int fillLevel = 0;
+        bool filling = false;
+
+    public:
+        void update(LEDSettingsManager settings, ControlManager controlManager) override {
+            if (digitalRead(BUTTON_PIN) == LOW) {
+                filling = true;
+            } else {
+                filling = false;
+            }
+
+            if (filling && fillLevel < NUM_LEDS) {
+                fillLevel++;
+            } else if (!filling && fillLevel > 0) {
+                fillLevel--;
+            }
+
+            CRGB color = calculateUniformColor(fillLevel);
+            for (int i = 0; i < NUM_LEDS; i++) {
+                leds[i] = i < fillLevel ? color : CRGB::Black;
+            }
+            delay(10);
+        }
+
+        CRGB calculateUniformColor(int fillLevel) {
+            float ratio = float(fillLevel) / float(NUM_LEDS);
+            if (ratio < 0.33) {
+                return CRGB::Green; // Green when few LEDs are lit
+            } else if (ratio < 0.66) {
+                return blend(CRGB::Green, CRGB::Red, (ratio - 0.33) * 6.0); // Blend to yellow and then to red
+            } else {
+                return CRGB::Red; // Red when many LEDs are lit
+            }
+        }
+};
+
+class GameMode : public LEDMode {
+    public:
+        void update(LEDSettingsManager settings, ControlManager controlManager) override {
+            // Placeholder for game mode
+            // Implement game logic here
+        }
 };
 
 
@@ -301,66 +460,57 @@ LightSwitchMode lightSwitchMode;
 GradualFillMode gradualFillMode;
 GameMode gameMode;
 
-LEDSettingsManager settings;
-
-bool prev_button_state = false;
+LEDSettingsManager settings = LEDSettingsManager();
 bool settings_modified = false;
+
+int dipPins[4] = {DIP1, DIP2, DIP3, DIP4};
+ControlManager controlManager(RED_BTN, GRN_BTN, DIP_SET, dipPins, BUTTON_PIN);
 
 void setup() {
     FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS);
-    settings = LEDSettingsManager();
-    pinMode(BUTTON_PIN, INPUT_PULLUP);
-    pinMode(RED_BTN, INPUT_PULLUP);
-    pinMode(GRN_BTN, INPUT_PULLUP);
-    pinMode(DIP1, INPUT_PULLUP);
-    pinMode(DIP2, INPUT_PULLUP);
-    pinMode(DIP3, INPUT_PULLUP);
-    pinMode(DIP4, INPUT_PULLUP);
-    pinMode(DIP_SET, INPUT_PULLUP);
-    Serial.begin(9600);
+    static LEDSettingsManager settings = LEDSettingsManager();
+    // settings.resetToDefault(); // use this if EEPROM is corrupted
+    Serial.begin(31250);
     currentMode = &runningDotMode; // Default mode
 }
 
-BTN_INPUT buttonInput(GRN_BTN, RED_BTN);
-
 void loop() {
   //read dip 4 as setting_mode. If the dip is active, settings can be edited.
-  bool settings_mode = !digitalRead(DIP_SET);
-  //read dip 1-3 as 3-bit number 0..7
-  int dip_number = 0;
-  dip_number |= !digitalRead(DIP1) << 0;
-  dip_number |= !digitalRead(DIP2) << 1;
-  dip_number |= !digitalRead(DIP3) << 2;
-  dip_number |= !digitalRead(DIP4) << 3;
-
-  if(settings_mode){
+  controlManager.update(); //read all inputs
+  // controlManager.debugPrint();
+  if(controlManager.settingsBtn.state){
     //SETTINGS MODE
-    buttonInput.setValue(settings.get_setting(static_cast<LEDSetting>(dip_number)));
-    buttonInput.update();
-    bool button_value = buttonInput.getValue();
-    // Replace the potentiometer reading with button input
-    settings.set_setting(static_cast<LEDSetting>(dip_number), button_value);
-    settings_modified = true;
-    Serial.println(buttonInput.getValue());
-    settings.display_setting(static_cast<LEDSetting>(dip_number), false);
+    LEDSetting currSetting = controlManager.getDipValueAsLEDSetting();
+    settings.drawSetting(leds, currSetting);
+    if(controlManager.greenBtn.pressed || controlManager.greenBtn.holding){
+      settings.incrementSetting(currSetting);
+      settings_modified = true;
+    } 
+    if(controlManager.redBtn.pressed || controlManager.redBtn.holding){
+      settings.decrementSetting(currSetting);
+      settings_modified = true;
+    } 
+    // settings.debugPrint();
+    // controlManager.debugPrint();
+    delay(5);
   }
   else  {
     //RUN MODE
     if(settings_modified){
       //if returning from settings, and settings have been modified, write new settings to eeprom
       settings_modified = false;
-      settings.write_to_eeprom();
+      settings.writeToEEPROM();
     }
     // FastLED.setBrightness(map(analogRead(POT_PIN), 1023, 0, 5, 255)); // Control brightness with potentiometer
     FastLED.setBrightness(255);
-    switch (dip_number) {
+    switch (controlManager.getDipValue()) {
         case 0: currentMode = &runningDotMode; break;
         case 1: currentMode = &lightSwitchMode; break;
         case 2: currentMode = &gradualFillMode; break;
         case 3: currentMode = &gameMode; break;
         // Additional cases for other modes
     }
-    currentMode->update(settings);    
+    currentMode->update(settings, controlManager);    
   }
   FastLED.show();
 }
