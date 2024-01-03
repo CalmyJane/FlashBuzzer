@@ -29,22 +29,22 @@ If the settings switch is high, the buzzer is in settings mode, now the 4 Progra
 Settings are stored on EEPROM
 
 Settings:
-Color1 - Red
-Color1 - Green
-Color1 - Blue
-Speed
-LED-Count
-Index1
-Color2 - Red
-Color2 - Green
-Color2 - Blue
-Idex2
-Color3 - Red
-Color3 - Green
-Color3 - Blue
-Random 0..255
-Broken Mode 0..10
-Broken Threshold 0..255
+- Color1 - Red
+- Color1 - Green
+- Color1 - Blue
+- Speed
+- LED-Count
+- Index1
+- Color2 - Red
+- Color2 - Green
+- Color2 - Blue
+- Idex2
+- Color3 - Red
+- Color3 - Green
+- Color3 - Blue
+- Random 0..255
+- Broken Mode 0..10
+- Broken Threshold 0..255
 
 
 ## Reset to Defaults
