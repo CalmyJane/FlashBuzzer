@@ -7,7 +7,7 @@ This repo contains arduino code and documentation for a "FlashBuzzer". It's a si
 
 - Buzzer - Main Button to interact with.
 
-![alt text](/images/inside_full.jpg)]
+!(/images/inside_full.jpg)]
 
 - Red/Green Button - two additional pushbuttons to change values
 - Program-Switches - 4 Dipswitches to input a 4-bit number (0..15) to select a mode or setting
