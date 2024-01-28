@@ -285,17 +285,17 @@ class LEDSettingsManager {
             settings[COLOR_BLUE] = Setting(0, 255, 255, 5, CRGB::Blue);
             settings[SPEED] = Setting(0, 1024, 5, 5, CRGB::Purple);
             settings[NUMBER_LEDS] = Setting(50, 350, 350, 1, CRGB::Purple);
-            settings[INDEX1] = Setting(0, 255, 20, 1, CRGB::Yellow); // Example initializer
+            settings[INDEX1] = Setting(0, 255, 20, 1, CRGB::Yellow);
             settings[COLOR_RED2] = Setting(0, 255, 255, 5, CRGB::Red);
             settings[COLOR_GREEN2] = Setting(0, 255, 255, 5, CRGB::Green);
             settings[COLOR_BLUE2] = Setting(0, 255, 255, 5, CRGB::Blue);
-            settings[INDEX2] = Setting(0, 255, 40, 1, CRGB::Yellow); // Example initializer
+            settings[INDEX2] = Setting(0, 255, 40, 1, CRGB::Yellow);
             settings[COLOR_RED3] = Setting(0, 255, 255, 5, CRGB::Red);
             settings[COLOR_GREEN3] = Setting(0, 255, 255, 5, CRGB::Green);
             settings[COLOR_BLUE3] = Setting(0, 255, 255, 5, CRGB::Blue);
-            settings[RANDOM] = Setting(0, 1024, 1, 1, CRGB::White); // Example initializer
-            settings[BROKEN_MODE] = Setting(0, 10, 1, 1, CRGB::White); // Example initializer
-            settings[BROKEN_THRESHOLD] = Setting(0, 255, 50, 1, CRGB::White); // Example initializer
+            settings[RANDOM] = Setting(0, 1024, 1, 1, CRGB::White);
+            settings[BROKEN_MODE] = Setting(0, 10, 1, 1, CRGB::White);
+            settings[BROKEN_THRESHOLD] = Setting(0, 255, 50, 1, CRGB::White);
 
             readFromEEPROM();
         }
@@ -329,19 +329,20 @@ class LEDSettingsManager {
             return CRGB(settings[COLOR_RED].value, settings[COLOR_GREEN].value, settings[COLOR_BLUE].value);
         }
 
-        void writeToEEPROM(){
-          //write values to EEPROM
-          for (int i = 0; i < SETTINGS_COUNT; ++i) {
-              EEPROM.write(i, settings[i].value);
-          }   
-          Serial.println("Written to EEPROM!");
+        void writeToEEPROM() {
+            int address = 0;
+            for (int i = 0; i < SETTINGS_COUNT; ++i) {
+                EEPROM.put(address, settings[i].value);
+                address += sizeof(int); // Move to the next address, considering the size of an int
+            }   
+            Serial.println("Written to EEPROM!");
         }
 
-        void readFromEEPROM(){
-            // Read settings from EEPROM and overwrite defaults if necessary
+        void readFromEEPROM() {
+            int address = 0;
             for (int i = 0; i < SETTINGS_COUNT; ++i) {
-                int eepromValue = EEPROM.read(i);
-                settings[i].value = eepromValue;
+                EEPROM.get(address, settings[i].value);
+                address += sizeof(int); // Move to the next address
             }      
         }
 
@@ -359,6 +360,7 @@ class LEDSettingsManager {
         }
 };
 
+// RUN MODES
 
 class LEDMode {
     public:
@@ -382,7 +384,7 @@ class RunningDotMode : public LEDMode {
             leds[0] = CRGB::Black;
 
             // delay(map(settings.settings[SPEED].value, 0, 255, 300, 3)); // Speed of shifting
-            delay(2);
+            //delay(2);
         }
 };
 
@@ -409,38 +411,44 @@ class LightSwitchMode : public LEDMode {
 
 class GradualFillMode : public LEDMode {
     private:
-        int fillLevel = 0;
-        bool filling = false;
+        int ledIndex = 0; // Current LED index
+        unsigned long lastUpdate = 0; // Last update time
+
+        CRGB getColorForIndex(LEDSettingsManager &settings, int index) {
+            int index1 = settings.getSetting(INDEX1);
+            int index2 = settings.getSetting(INDEX2);
+
+            if (index < index1) {
+                return CRGB(settings.getSetting(COLOR_RED), settings.getSetting(COLOR_GREEN), settings.getSetting(COLOR_BLUE));
+            } else if (index < index2) {
+                return CRGB(settings.getSetting(COLOR_RED2), settings.getSetting(COLOR_GREEN2), settings.getSetting(COLOR_BLUE2));
+            } else {
+                return CRGB(settings.getSetting(COLOR_RED3), settings.getSetting(COLOR_GREEN3), settings.getSetting(COLOR_BLUE3));
+            }
+        }
 
     public:
         void update(LEDSettingsManager settings, ControlManager controlManager) override {
-            if (digitalRead(BUTTON_PIN) == LOW) {
-                filling = true;
+            unsigned long currentTime = millis();
+            int speed = settings.getSetting(SPEED); // Get speed setting
+
+            if (controlManager.buzzer.state) {
+                if (currentTime - lastUpdate > speed && ledIndex < NUM_LEDS) {
+                    leds[ledIndex] = getColorForIndex(settings, ledIndex);
+                    ledIndex++;
+                    lastUpdate = currentTime;
+                }
             } else {
-                filling = false;
+                if (currentTime - lastUpdate > speed && ledIndex > 0) {
+                    ledIndex--;
+                    leds[ledIndex] = CRGB::Black;
+                    lastUpdate = currentTime;
+                }
             }
 
-            if (filling && fillLevel < NUM_LEDS) {
-                fillLevel++;
-            } else if (!filling && fillLevel > 0) {
-                fillLevel--;
-            }
-
-            CRGB color = calculateUniformColor(fillLevel);
-            for (int i = 0; i < NUM_LEDS; i++) {
-                leds[i] = i < fillLevel ? color : CRGB::Black;
-            }
-            delay(10);
-        }
-
-        CRGB calculateUniformColor(int fillLevel) {
-            float ratio = float(fillLevel) / float(NUM_LEDS);
-            if (ratio < 0.33) {
-                return CRGB::Green; // Green when few LEDs are lit
-            } else if (ratio < 0.66) {
-                return blend(CRGB::Green, CRGB::Red, (ratio - 0.33) * 6.0); // Blend to yellow and then to red
-            } else {
-                return CRGB::Red; // Red when many LEDs are lit
+            // If buzzer is not pressed and all LEDs are off, reset ledIndex to 0
+            if (!controlManager.buzzer.state && ledIndex == 0) {
+                fill_solid(leds, NUM_LEDS, CRGB::Black); // Ensure all LEDs are off
             }
         }
 };
@@ -453,12 +461,52 @@ class GameMode : public LEDMode {
         }
 };
 
+class LEDCounterMode : public LEDMode {
+    private:
+        int ledCount = 0; // Number of LEDs turned on
+
+    public:
+        void update(LEDSettingsManager settings, ControlManager controlManager) override {
+            // Turn on additional LEDs with the green button
+            if (controlManager.greenBtn.pressed) {
+                ledCount = min(ledCount + 10, NUM_LEDS);
+            }
+
+            // Turn off LEDs with the red button
+            if (controlManager.redBtn.pressed) {
+                ledCount = max(ledCount - 10, 0);
+            }
+
+            // Turn on one more LED with the buzzer button
+            if (controlManager.buzzer.pressed) {
+                ledCount = min(ledCount + 1, NUM_LEDS);
+            }
+
+            // Update LED strip based on the current count
+            for (int i = 0; i < NUM_LEDS; i++) {
+                leds[i] = i < ledCount ? CRGB::White : CRGB::Black;
+            }
+
+        }
+};
+
+class DebugMode : public LEDMode {
+    public:
+        void update(LEDSettingsManager settings, ControlManager controlManager) override {
+            // Set all LEDs to white
+            fill_solid(leds, NUM_LEDS, CRGB::White);
+        }
+};
+
+
 
 LEDMode* currentMode;
 RunningDotMode runningDotMode;
 LightSwitchMode lightSwitchMode;
 GradualFillMode gradualFillMode;
 GameMode gameMode;
+LEDCounterMode ledCounterMode;
+DebugMode debugMode;
 
 LEDSettingsManager settings = LEDSettingsManager();
 bool settings_modified = false;
@@ -508,8 +556,11 @@ void loop() {
         case 1: currentMode = &lightSwitchMode; break;
         case 2: currentMode = &gradualFillMode; break;
         case 3: currentMode = &gameMode; break;
+        case 4: currentMode = &ledCounterMode; break;
+        case 15: currentMode = &debugMode; break;
         // Additional cases for other modes
     }
+    Serial.println(controlManager.getDipValue());
     currentMode->update(settings, controlManager);    
   }
   FastLED.show();
