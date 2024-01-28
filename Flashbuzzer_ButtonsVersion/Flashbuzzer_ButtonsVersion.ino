@@ -152,6 +152,16 @@ class ControlManager {
             return value;
         }
 
+        bool getDipChanged() {
+            bool changed = false;
+            for (int i = 0; i < 4; i++) {
+                if (dipSwitches[i].pressed || dipSwitches[i].released) {
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
         void setIncDecValue(int value) {
             incDecValue = value;
         }
@@ -373,12 +383,17 @@ class LEDSettingsManager {
 class LEDMode {
     public:
         virtual void update(LEDSettingsManager settings, ControlManager controlManager) = 0;
+        virtual void init(LEDSettingsManager settings, ControlManager controlManager) = 0;
 };
 
 class RunningDotMode : public LEDMode {
     private:
 
     public:
+        void init(LEDSettingsManager settings, ControlManager controlManager) override {
+          //empty init
+        }
+
         void update(LEDSettingsManager settings, ControlManager controlManager) override {
             bool newButtonState = digitalRead(BUTTON_PIN);
             if (controlManager.buzzer.pressed) {
@@ -402,6 +417,10 @@ class LightSwitchMode : public LEDMode {
         bool oldButtonState = HIGH;
 
     public:
+        void init(LEDSettingsManager settings, ControlManager controlManager) override {
+          //empty init
+        }
+
         void update(LEDSettingsManager settings, ControlManager controlManager) override {
             bool newButtonState = !digitalRead(BUTTON_PIN);
             if (newButtonState == LOW && oldButtonState == HIGH) {
@@ -436,6 +455,10 @@ class GradualFillMode : public LEDMode {
         }
 
     public:
+        void init(LEDSettingsManager settings, ControlManager controlManager) override {
+          //empty init
+        }
+
         void update(LEDSettingsManager settings, ControlManager controlManager) override {
             unsigned long currentTime = millis();
             int speed = settings.getSetting(SPEED); // Get speed setting
@@ -462,18 +485,168 @@ class GradualFillMode : public LEDMode {
 };
 
 class GameMode : public LEDMode {
+    private:
+        int ledIndex = 0; // Current LED index
+        unsigned long lastUpdate = 0; // Last update time
+
+        CRGB getColorForIndex(LEDSettingsManager &settings, int index) {
+            int index1 = settings.getSetting(INDEX1);
+            int index2 = settings.getSetting(INDEX2);
+
+            if (index < index1) {
+                return CRGB(settings.getSetting(COLOR_RED), settings.getSetting(COLOR_GREEN), settings.getSetting(COLOR_BLUE));
+            } else if (index < index2) {
+                return CRGB(settings.getSetting(COLOR_RED2), settings.getSetting(COLOR_GREEN2), settings.getSetting(COLOR_BLUE2));
+            } else {
+                return CRGB(settings.getSetting(COLOR_RED3), settings.getSetting(COLOR_GREEN3), settings.getSetting(COLOR_BLUE3));
+            }
+        }
+
     public:
+        void init(LEDSettingsManager settings, ControlManager controlManager) override {
+          //empty init
+        }
+
         void update(LEDSettingsManager settings, ControlManager controlManager) override {
-            // Placeholder for game mode
-            // Implement game logic here
+            unsigned long currentTime = millis();
+            int speed = settings.getSetting(SPEED); // Get speed setting
+
+            if (controlManager.buzzer.state) {
+                if (currentTime - lastUpdate > speed && ledIndex < NUM_LEDS) {
+                    leds[ledIndex] = getColorForIndex(settings, ledIndex);
+                    ledIndex++;
+                    lastUpdate = currentTime;
+                }
+            } else {
+                if (currentTime - lastUpdate > speed && ledIndex > 0) {
+                    ledIndex--;
+                    leds[ledIndex] = CRGB::Black;
+                    lastUpdate = currentTime;
+                }
+            }
+
+            // If buzzer is not pressed and all LEDs are off, reset ledIndex to 0
+            if (!controlManager.buzzer.state && ledIndex == 0) {
+                fill_solid(leds, NUM_LEDS, CRGB::Black); // Ensure all LEDs are off
+            }
         }
 };
+
+// class GameMode : public LEDMode {
+//   private:
+//     enum GameState { WAIT_ON_START, PLAY_MODE, WIN, LOSE };
+//     GameState gameState = WAIT_ON_START;
+//     unsigned long lastUpdate = 0;
+//     int dotIndex; // Current position of the running dot
+//     int baseLEDCount = 3; // Number of LEDs at the base (adjustable for difficulty)
+//     bool movingAway = false; // Direction of the dot movement
+//     int baseBlinkCounter = 0;
+
+//     CRGB getBaseColor(LEDSettingsManager &settings) {
+//       return CRGB(settings.getSetting(COLOR_RED2), settings.getSetting(COLOR_GREEN2), settings.getSetting(COLOR_BLUE2));
+//     }
+
+//     CRGB getDotColor(LEDSettingsManager &settings) {
+//       return CRGB(settings.getSetting(COLOR_RED), settings.getSetting(COLOR_GREEN), settings.getSetting(COLOR_BLUE));
+//     }
+
+//   public:
+
+//     void init(LEDSettingsManager settings, ControlManager controlManager) override {
+//       baseLEDCount = 3;
+//       movingAway = false;
+//       baseBlinkCounter = 0;
+//       gameState = WAIT_ON_START;
+//     }
+
+//     void update(LEDSettingsManager settings, ControlManager controlManager) override {
+//       switch (gameState) {
+//         case WAIT_ON_START:
+//           // Blink first 3 LEDs as attract mode
+//           if (millis() - lastUpdate > 500) { // Blink every half second
+//             Serial.println("test");
+//             for (int i = 0; i < baseLEDCount; ++i){
+//               baseBlinkCounter++;
+//               if(baseBlinkCounter >= baseLEDCount) baseBlinkCounter = 0;
+//               leds[i] = (i == baseBlinkCounter ? getBaseColor(settings) : CRGB::Black);
+//             } 
+//             // Serial.println(baseLEDCount);
+//             lastUpdate = millis();
+//           }
+//           if (controlManager.buzzer.pressed) {
+//             gameState = PLAY_MODE;
+//             dotIndex = settings.getSetting(INDEX1);
+//             movingAway = false;
+//           }
+//           break;
+//         case PLAY_MODE:
+//           // Run the dot towards the button
+//           if (millis() - lastUpdate > settings.getSetting(SPEED)) {
+//             lastUpdate = millis();
+//             moveDot(settings);
+//             if (checkForWinLoseCondition(settings.getSetting(INDEX1))) {
+//               gameState = movingAway ? WIN : LOSE;
+//             }
+//           }
+//           break;
+//         case WIN:
+//           // Dot runs away from the button
+//           if (!movingAway) {
+//             movingAway = true;
+//             dotIndex = 0;
+//           } else if (dotIndex < settings.getSetting(INDEX1)) {
+//             leds[dotIndex++] = getDotColor(settings);
+//           } else {
+//             gameState = WAIT_ON_START;
+//           }
+//           break;
+//         case LOSE:
+//           // Blink all LEDs red three times and reset
+//           blinkAllLedsRed(3);
+//           gameState = WAIT_ON_START;
+//           break;
+//       }
+//       delay(3);
+//     }
+
+//   private:
+//     void moveDot(LEDSettingsManager &settings) {
+//       fill_solid(leds, NUM_LEDS, CRGB::Black);
+//       leds[dotIndex] = getDotColor(settings);
+//       if (!movingAway) {
+//         if (dotIndex > 0) dotIndex--;
+//       } else {
+//         if (dotIndex < settings.getSetting(INDEX1)) dotIndex++;
+//       }
+//     }
+
+//     bool checkForWinLoseCondition(int limit) {
+//       // Check if the dot is within the base LED range
+//       return (!movingAway && dotIndex < baseLEDCount) || (movingAway && dotIndex >= limit);
+//     }
+
+//     void blinkAllLedsRed(int count) {
+//       for (int i = 0; i < count; ++i) {
+//         fill_solid(leds, NUM_LEDS, CRGB::Red);
+//         FastLED.show();
+//         delay(300);
+//         fill_solid(leds, NUM_LEDS, CRGB::Black);
+//         FastLED.show();
+//         delay(300);
+//       }
+//     }
+// };
 
 class LEDCounterMode : public LEDMode {
     private:
         int ledCount = 0; // Number of LEDs turned on
 
     public:
+
+        void init(LEDSettingsManager settings, ControlManager controlManager) override {
+          //empty init
+        }
+
         void update(LEDSettingsManager settings, ControlManager controlManager) override {
             // Turn on additional LEDs with the green button
             if (controlManager.greenBtn.pressed) {
@@ -500,13 +673,16 @@ class LEDCounterMode : public LEDMode {
 
 class DebugMode : public LEDMode {
     public:
+
+        void init(LEDSettingsManager settings, ControlManager controlManager) override {
+          //empty init
+        }
+
         void update(LEDSettingsManager settings, ControlManager controlManager) override {
             // Set all LEDs to white
             fill_solid(leds, NUM_LEDS, CRGB::White);
         }
 };
-
-
 
 LEDMode* currentMode;
 RunningDotMode runningDotMode;
@@ -527,7 +703,8 @@ void setup() {
     static LEDSettingsManager settings = LEDSettingsManager();
     // settings.resetToDefault(); // use this if EEPROM is corrupted
     Serial.begin(31250);
-    currentMode = &runningDotMode; // Default mode
+    controlManager.update();
+    startMode();
 }
 
 void loop() {
@@ -559,6 +736,17 @@ void loop() {
     }
     // FastLED.setBrightness(map(analogRead(POT_PIN), 1023, 0, 5, 255)); // Control brightness with potentiometer
     FastLED.setBrightness(255);
+    if(controlManager.getDipChanged()){
+      startMode();
+    }
+    Serial.println(controlManager.getDipValue());
+    currentMode->update(settings, controlManager);    
+  }
+  FastLED.show();
+}
+
+void startMode(){
+    // get dipswitch values and init mode
     switch (controlManager.getDipValue()) {
         case 0: currentMode = &runningDotMode; break;
         case 1: currentMode = &lightSwitchMode; break;
@@ -568,8 +756,5 @@ void loop() {
         case 15: currentMode = &debugMode; break;
         // Additional cases for other modes
     }
-    Serial.println(controlManager.getDipValue());
-    currentMode->update(settings, controlManager);    
-  }
-  FastLED.show();
+    currentMode->init(settings, controlManager);
 }
