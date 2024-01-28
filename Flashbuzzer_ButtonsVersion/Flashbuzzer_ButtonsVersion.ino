@@ -254,7 +254,7 @@ class Setting {
 
         Setting(int minValue, int maxValue, int defaultValue, int stdIncrement, CRGB settingColor)
             : minimum(minValue), maximum(maxValue), value(defaultValue), increment(stdIncrement), color(settingColor) {
-              defaultValue = value;
+              value = defaultValue;
             }
 
         void increase() {
@@ -273,6 +273,11 @@ class Setting {
             }
             // Note: FastLED.show() should be called externally after this function
         }
+
+        void reset(){
+          // resets the value to default value
+          value = defaultValue;
+        }
 };
 
 class LEDSettingsManager {
@@ -280,23 +285,7 @@ class LEDSettingsManager {
         Setting settings[SETTINGS_COUNT];
         LEDSettingsManager() {
             // Initialize settings with default values
-            settings[COLOR_RED] = Setting(0, 255, 255, 5, CRGB::Red);
-            settings[COLOR_GREEN] = Setting(0, 255, 255, 5, CRGB::Green);
-            settings[COLOR_BLUE] = Setting(0, 255, 255, 5, CRGB::Blue);
-            settings[SPEED] = Setting(0, 1024, 5, 5, CRGB::Purple);
-            settings[NUMBER_LEDS] = Setting(50, 350, 350, 1, CRGB::Purple);
-            settings[INDEX1] = Setting(0, 255, 20, 1, CRGB::Yellow);
-            settings[COLOR_RED2] = Setting(0, 255, 255, 5, CRGB::Red);
-            settings[COLOR_GREEN2] = Setting(0, 255, 255, 5, CRGB::Green);
-            settings[COLOR_BLUE2] = Setting(0, 255, 255, 5, CRGB::Blue);
-            settings[INDEX2] = Setting(0, 255, 40, 1, CRGB::Yellow);
-            settings[COLOR_RED3] = Setting(0, 255, 255, 5, CRGB::Red);
-            settings[COLOR_GREEN3] = Setting(0, 255, 255, 5, CRGB::Green);
-            settings[COLOR_BLUE3] = Setting(0, 255, 255, 5, CRGB::Blue);
-            settings[RANDOM] = Setting(0, 1024, 1, 1, CRGB::White);
-            settings[BROKEN_MODE] = Setting(0, 10, 1, 1, CRGB::White);
-            settings[BROKEN_THRESHOLD] = Setting(0, 255, 50, 1, CRGB::White);
-
+            initialize();
             readFromEEPROM();
         }
 
@@ -346,10 +335,29 @@ class LEDSettingsManager {
             }      
         }
 
+        void initialize(){
+            settings[COLOR_RED] = Setting(0, 255, 255, 5, CRGB::Red);
+            settings[COLOR_GREEN] = Setting(0, 255, 255, 5, CRGB::Green);
+            settings[COLOR_BLUE] = Setting(0, 255, 255, 5, CRGB::Blue);
+            settings[SPEED] = Setting(0, 1024, 5, 5, CRGB::Purple);
+            settings[NUMBER_LEDS] = Setting(50, 350, 350, 1, CRGB::Purple);
+            settings[INDEX1] = Setting(0, 255, 20, 1, CRGB::Yellow);
+            settings[COLOR_RED2] = Setting(0, 255, 255, 5, CRGB::Red);
+            settings[COLOR_GREEN2] = Setting(0, 255, 255, 5, CRGB::Green);
+            settings[COLOR_BLUE2] = Setting(0, 255, 255, 5, CRGB::Blue);
+            settings[INDEX2] = Setting(0, 255, 40, 1, CRGB::Yellow);
+            settings[COLOR_RED3] = Setting(0, 255, 255, 5, CRGB::Red);
+            settings[COLOR_GREEN3] = Setting(0, 255, 255, 5, CRGB::Green);
+            settings[COLOR_BLUE3] = Setting(0, 255, 255, 5, CRGB::Blue);
+            settings[RANDOM] = Setting(0, 1024, 1, 1, CRGB::White);
+            settings[BROKEN_MODE] = Setting(0, 10, 1, 1, CRGB::White);
+            settings[BROKEN_THRESHOLD] = Setting(0, 255, 50, 1, CRGB::White);
+        }
+
         void resetToDefault(){
-          for (int i = 0; i < SETTINGS_COUNT; i++){
-            settings[i].value = settings[i].defaultValue;
-          }
+            // init and write new values to eeprom
+            initialize();
+            writeToEEPROM();
         }
 
         void debugPrint() {
