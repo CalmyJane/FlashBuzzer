@@ -739,7 +739,6 @@ void loop() {
     if(controlManager.getDipChanged()){
       startMode();
     }
-    Serial.println(controlManager.getDipValue());
     currentMode->update(settings, controlManager);    
   }
   FastLED.show();
