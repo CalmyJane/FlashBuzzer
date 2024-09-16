@@ -6,41 +6,136 @@
 #include <Preferences.h>  // For non-volatile memory storage (NVS)
 #include <FastLED.h>
 
-#define LED_PIN 16          // Pin to which the LED strip is connected
-#define NUM_LEDS 300        // Number of LEDs in the strip
-#define BRIGHTNESS 200      // Brightness of the LEDs (0-255)
-#define COLOR CRGB::Red     // Color of the running dot
+#include <vector>
+#include <FastLED.h>
+
+#define NUM_LEDS 300      // Define the number of LEDs in your strip
+#define LED_PIN 16        // Define your LED strip pin
+#define DEFAULT_BRIGHTNESS 100  // Default brightness
+#define DEFAULT_COLOR CRGB::Red // Default color for the running dots
 #define BUTTON_PIN 13  // Pin where the button is connected
+#define DEFAULT_WIDTH 1
 
 class RunningDot {
 public:
-    // Constructor: Initializes the LED strip
-    RunningDot() : currentPosition(0) {
+    // Constructor: Initialize variables with default color and brightness
+    RunningDot() : lastUpdateTime(0), speed(30.0f), currentColor(DEFAULT_COLOR), currentBrightness(DEFAULT_BRIGHTNESS), dotWidth(DEFAULT_WIDTH) {}
+
+    // Initialize FastLED in setup
+    void begin()
+    {
         FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
-        FastLED.setBrightness(BRIGHTNESS);
+        FastLED.setBrightness(currentBrightness);
         FastLED.clear();
         FastLED.show();
     }
 
-    // This function moves the dot one step forward on the strip
-    void trigger() {
-        // Clear previous position
-        FastLED.clear();
-        
-        // Set the new position for the running dot
-        leds[currentPosition] = COLOR;
-        
-        // Move to the next position, wrap around if needed
-        currentPosition = (currentPosition + 1) % NUM_LEDS;
-        
-        // Show the update
-        FastLED.show();
+    // Trigger a new dot at the beginning of the strip with a float position
+    void trigger()
+    {
+        activeDots.push_back(0.0f); // Add a new dot at position 0.0 (floating point)
+    }
+
+    // Update the position of all dots and render them
+    void update()
+    {
+        // Get the current time
+        unsigned long currentMillis = millis();
+
+        // Calculate time passed in seconds since the last update
+        float deltaTime = (currentMillis - lastUpdateTime) / 1000.0f;
+
+        // If enough time has passed, update the positions of the dots
+        if (deltaTime > 0.0f) {
+            // Clear the strip for new positions
+            FastLED.clear();
+
+            // Update positions of all active dots based on time passed and speed
+            for (int i = 0; i < activeDots.size(); i++)
+            {
+                if (activeDots[i] < NUM_LEDS)
+                {
+                    // Render the dot at its current floating position with brightness falloff
+                    renderDot(activeDots[i]);
+                }
+                // Update the dot's position based on the speed (pixels/second)
+                activeDots[i] += speed * deltaTime;
+            }
+
+            // Remove dots that have moved beyond the strip
+            activeDots.erase(
+                std::remove_if(activeDots.begin(), activeDots.end(),
+                               [](float pos) { return pos >= NUM_LEDS; }),
+                activeDots.end());
+
+            // Show the updated LED strip
+            FastLED.show();
+
+            // Update the lastUpdateTime to the current time
+            lastUpdateTime = currentMillis;
+        }
+    }
+
+    // Set the speed of the running dots (pixels per second)
+    void setSpeed(float newSpeed)
+    {
+        speed = newSpeed; // Speed is now in pixels/second
+    }
+
+    // Set the color of the running dots
+    void setColor(CRGB newColor)
+    {
+        currentColor = newColor;
+    }
+
+    // Set the brightness of the LED strip
+    void setBrightness(uint8_t newBrightness)
+    {
+        currentBrightness = newBrightness;
+        FastLED.setBrightness(currentBrightness); // Update FastLED brightness setting
+    }
+
+    // Set the width of the dot (affects brightness falloff)
+    void setWidth(float newWidth)
+    {
+        dotWidth = newWidth;
     }
 
 private:
-    CRGB leds[NUM_LEDS];    // Array to store the LED colors
-    int currentPosition;    // Current position of the running dot
+    CRGB leds[NUM_LEDS];           // Array to store the LED colors
+    std::vector<float> activeDots; // Vector to store the positions of active dots (float positions)
+    unsigned long lastUpdateTime;  // To track when the dots were last updated
+    float speed;                   // Speed of the dots in pixels per second
+    CRGB currentColor;             // Current color of the running dots
+    uint8_t currentBrightness;     // Current brightness of the LED strip
+    float dotWidth;                // Width of the dot (affects how quickly the brightness falls off)
+
+    // Function to render a dot with smooth brightness fading
+    void renderDot(float position)
+    {
+        int centerLED = (int)position; // The nearest integer LED to the dot's center position
+
+        // Iterate over all LEDs to calculate their brightness based on distance from the dot center
+        for (int i = 0; i < NUM_LEDS; i++)
+        {
+            float distance = fabs(i - position); // Calculate the distance of each LED from the dot center
+
+            // If the LED is within the dotWidth range, calculate the brightness falloff
+            if (distance < dotWidth)
+            {
+                // Calculate brightness as a fraction (falling off linearly from the center)
+                float brightness = 1.0f - (distance / dotWidth);
+
+                // Apply the brightness to the color and add it to the existing LED state
+                leds[i] += CRGB(
+                    (uint8_t)(currentColor.r * brightness),
+                    (uint8_t)(currentColor.g * brightness),
+                    (uint8_t)(currentColor.b * brightness));
+            }
+        }
+    }
 };
+
 
 class ConfigParameter {
 public:
@@ -581,7 +676,7 @@ private:
 
 // Global WebConfig object
 WebConfig webConfig("esp32_bob", "12345678");
-// RunningDot runningDot;
+RunningDot runningDot;
 
 bool laststate = false;
 
@@ -594,26 +689,35 @@ void setup() {
     webConfig.setTitle("ESP32 Device Configuration");
 
     // Add configuration parameters
-    webConfig.addParamFloat("Red", 255.0);
-    webConfig.addParamFloat("Green", 255.0);
-    webConfig.addParamFloat("Blue", 255.0);
+    webConfig.addParamFloat("Color_Red", 255.0);
+    webConfig.addParamFloat("Color_Green", 255.0);
+    webConfig.addParamFloat("Color_Blue", 255.0);
+    webConfig.addParamFloat("Speed", 30);
+    webConfig.addParamFloat("Brightness", 30);
+    webConfig.addParamFloat("Width", 30);
     
     webConfig.begin(); // Start the AP and web server
-    // pinMode(BUTTON_PIN, INPUT_PULLUP);
+    runningDot.setBrightness(webConfig.getParamFloat("Brightness"));
+    runningDot.setSpeed(webConfig.getParamFloat("Speed"));
+    runningDot.begin();
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
 
 }
 
 
 void loop() {
     webConfig.handleClient(); // Handle client requests
-    // Check if the button is pressed (LOW means pressed, due to internal pull-up)
-    // bool state = digitalRead(BUTTON_PIN);
-    // Serial.println(state);
-    // if (!state && laststate) {
-    //     // Trigger the running dot when the button is pressed
-    //     runningDot.trigger();
-    //     Serial.println("Pressed");
-    //     laststate = state;
-    //     // Debounce delay to avoid multiple triggers from a single press
-    // }
+
+    bool state = !digitalRead(BUTTON_PIN);
+    if (state && !laststate) {
+        // Trigger the running dot when the button is pressed
+        runningDot.trigger();
+        Serial.println("Pressed");
+        // Debounce delay to avoid multiple triggers from a single press
+    }
+    runningDot.setBrightness(webConfig.getParamFloat("Brightness"));
+    runningDot.setSpeed(webConfig.getParamFloat("Speed"));
+    runningDot.setWidth(webConfig.getParamFloat("Width"));
+    laststate = state;
+    runningDot.update();
 }
